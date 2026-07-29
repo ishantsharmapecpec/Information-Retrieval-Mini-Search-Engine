@@ -1,1 +1,2 @@
+streamlit
 pytest==8.2.2
