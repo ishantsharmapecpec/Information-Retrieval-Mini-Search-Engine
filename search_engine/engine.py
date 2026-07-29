@@ -1,7 +1,7 @@
 import math
 
 from .index import InvertedIndex
-from .models import SearchResult
+from .models import SearchResult, TermMatch
 from .query_parser import (
     is_phrase_query,
     parse_boolean_query
@@ -12,6 +12,7 @@ from .tokenizer import tokenize
 class SearchEngine:
 
     def __init__(self):
+
         self.index = InvertedIndex()
 
     def add_document(
@@ -19,13 +20,16 @@ class SearchEngine:
         document_id: int,
         title: str,
         path: str,
-        text: str
+        text: str,
+        pages: dict[int, str] | None = None
     ):
+
         self.index.add_document(
             document_id=document_id,
             title=title,
             path=path,
-            text=text
+            text=text,
+            pages=pages
         )
 
     def search(
@@ -39,9 +43,9 @@ class SearchEngine:
         if not query:
             return []
 
-        # -----------------------------------------
-        # Phrase Search
-        # -----------------------------------------
+        # -----------------------------
+        # PHRASE SEARCH
+        # -----------------------------
 
         if is_phrase_query(query):
 
@@ -51,17 +55,19 @@ class SearchEngine:
                 phrase
             )
 
-            return self._build_results(
+            return self._build_phrase_results(
                 document_ids,
-                query,
+                phrase,
                 limit
             )
 
-        # -----------------------------------------
-        # Boolean Search
-        # -----------------------------------------
+        # -----------------------------
+        # BOOLEAN SEARCH
+        # -----------------------------
 
-        boolean_query = parse_boolean_query(query)
+        boolean_query = parse_boolean_query(
+            query
+        )
 
         if boolean_query:
 
@@ -73,15 +79,17 @@ class SearchEngine:
                 right
             )
 
-            return self._build_results(
+            return self._build_boolean_results(
                 document_ids,
-                query,
+                operator,
+                left,
+                right,
                 limit
             )
 
-        # -----------------------------------------
-        # Ranked TF-IDF Search
-        # -----------------------------------------
+        # -----------------------------
+        # TF-IDF SEARCH
+        # -----------------------------
 
         return self.tfidf_search(
             query,
@@ -98,26 +106,35 @@ class SearchEngine:
 
         scores = {}
 
-        total_documents = self.index.document_count
+        total_documents = (
+            self.index.document_count
+        )
 
         if total_documents == 0:
             return []
 
         for term in query_tokens:
 
-            documents = self.index.documents_for_term(
-                term
+            documents = (
+                self.index.documents_for_term(
+                    term
+                )
             )
 
-            document_frequency = len(documents)
+            document_frequency = len(
+                documents
+            )
 
             if document_frequency == 0:
                 continue
 
+            # Smoothed IDF so a single-document
+            # search does not produce score 0
             idf = math.log(
-                total_documents /
-                document_frequency
-            )
+                (total_documents + 1)
+                /
+                (document_frequency + 1)
+            ) + 1
 
             for document_id in documents:
 
@@ -125,19 +142,24 @@ class SearchEngine:
                     document_id
                 ]
 
-                term_frequency = tokens.count(term)
+                if not tokens:
+                    continue
 
-                tf = (
-                    term_frequency /
+                term_frequency = (
+                    tokens.count(term)
+                    /
                     len(tokens)
-                    if tokens
-                    else 0
                 )
 
-                score = tf * idf
+                score = (
+                    term_frequency * idf
+                )
 
                 scores[document_id] = (
-                    scores.get(document_id, 0)
+                    scores.get(
+                        document_id,
+                        0
+                    )
                     + score
                 )
 
@@ -151,15 +173,51 @@ class SearchEngine:
 
         for document_id, score in ranked[:limit]:
 
+            term_matches = []
+
+            for term in query_tokens:
+
+                count = (
+                    self.index.get_term_count(
+                        document_id,
+                        term
+                    )
+                )
+
+                pages = (
+                    self.index.get_term_pages(
+                        document_id,
+                        term
+                    )
+                )
+
+                term_matches.append(
+                    TermMatch(
+                        term=term,
+                        count=count,
+                        pages=pages
+                    )
+                )
+
             results.append(
                 SearchResult(
-                    title=self.index.titles[document_id],
-                    path=self.index.paths[document_id],
-                    score=round(score, 4),
+                    document_id=document_id,
+                    title=self.index.titles[
+                        document_id
+                    ],
+                    path=self.index.paths[
+                        document_id
+                    ],
+                    score=round(
+                        score,
+                        6
+                    ),
                     snippet=self._create_snippet(
                         document_id,
                         query_tokens
-                    )
+                    ),
+                    term_matches=term_matches,
+                    match_type="TF-IDF Ranked Search"
                 )
             )
 
@@ -178,15 +236,19 @@ class SearchEngine:
         if not left_tokens:
             return set()
 
-        left_docs = self.index.documents_for_term(
-            left_tokens[0]
+        left_docs = (
+            self.index.documents_for_term(
+                left_tokens[0]
+            )
         )
 
         if not right_tokens:
             return left_docs
 
-        right_docs = self.index.documents_for_term(
-            right_tokens[0]
+        right_docs = (
+            self.index.documents_for_term(
+                right_tokens[0]
+            )
         )
 
         if operator == "AND":
@@ -255,38 +317,147 @@ class SearchEngine:
                         )
                     )
 
-                    if required_position not in token_positions:
+                    if (
+                        required_position
+                        not in token_positions
+                    ):
                         matched = False
                         break
 
                 if matched:
-                    matches.add(document_id)
+                    matches.add(
+                        document_id
+                    )
                     break
 
         return matches
 
-    def _build_results(
+    def _build_boolean_results(
         self,
         document_ids: set[int],
-        query: str,
+        operator: str,
+        left: str,
+        right: str,
         limit: int
     ) -> list[SearchResult]:
 
-        query_tokens = tokenize(query)
-
         results = []
 
-        for document_id in list(document_ids)[:limit]:
+        left_tokens = tokenize(left)
+        right_tokens = tokenize(right)
+
+        terms = []
+
+        if left_tokens:
+            terms.append(left_tokens[0])
+
+        if right_tokens:
+            terms.append(right_tokens[0])
+
+        for document_id in list(
+            document_ids
+        )[:limit]:
+
+            term_matches = []
+
+            for term in terms:
+
+                count = (
+                    self.index.get_term_count(
+                        document_id,
+                        term
+                    )
+                )
+
+                pages = (
+                    self.index.get_term_pages(
+                        document_id,
+                        term
+                    )
+                )
+
+                term_matches.append(
+                    TermMatch(
+                        term=term,
+                        count=count,
+                        pages=pages
+                    )
+                )
 
             results.append(
                 SearchResult(
-                    title=self.index.titles[document_id],
-                    path=self.index.paths[document_id],
+                    document_id=document_id,
+                    title=self.index.titles[
+                        document_id
+                    ],
+                    path=self.index.paths[
+                        document_id
+                    ],
                     score=1.0,
                     snippet=self._create_snippet(
                         document_id,
-                        query_tokens
+                        terms
+                    ),
+                    term_matches=term_matches,
+                    match_type=(
+                        f"Boolean {operator}"
                     )
+                )
+            )
+
+        return results
+
+    def _build_phrase_results(
+        self,
+        document_ids: set[int],
+        phrase: str,
+        limit: int
+    ) -> list[SearchResult]:
+
+        results = []
+
+        for document_id in list(
+            document_ids
+        )[:limit]:
+
+            phrase_count = (
+                self.index.get_phrase_count(
+                    document_id,
+                    phrase
+                )
+            )
+
+            phrase_pages = (
+                self.index.get_phrase_pages(
+                    document_id,
+                    phrase
+                )
+            )
+
+            term_matches = [
+                TermMatch(
+                    term=f'"{phrase}"',
+                    count=phrase_count,
+                    pages=phrase_pages
+                )
+            ]
+
+            results.append(
+                SearchResult(
+                    document_id=document_id,
+                    title=self.index.titles[
+                        document_id
+                    ],
+                    path=self.index.paths[
+                        document_id
+                    ],
+                    score=1.0,
+                    snippet=self._create_snippet(
+                        document_id,
+                        tokenize(phrase)
+                    ),
+                    term_matches=term_matches,
+                    match_type="Exact Phrase Search"
                 )
             )
 
@@ -296,7 +467,7 @@ class SearchEngine:
         self,
         document_id: int,
         query_tokens: list[str],
-        length: int = 300
+        length: int = 350
     ) -> str:
 
         text = self.index.documents[
@@ -317,11 +488,14 @@ class SearchEngine:
                 break
 
         if position == -1:
-            return text[:length].strip()
+
+            return text[
+                :length
+            ].strip()
 
         start = max(
             0,
-            position - 100
+            position - 120
         )
 
         end = min(
@@ -329,7 +503,9 @@ class SearchEngine:
             position + length
         )
 
-        snippet = text[start:end].strip()
+        snippet = text[
+            start:end
+        ].strip()
 
         if start > 0:
             snippet = "..." + snippet
