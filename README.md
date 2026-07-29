@@ -8,7 +8,7 @@ An interactive **Streamlit web application** provides document upload, ranked se
 
 ## 🚀 Live Demo
 
-**Try the application:** [Mini Search Engine](YOUR_STREAMLIT_APP_URL)
+**Try the application:** [Mini Search Engine](https://information-retrieval-mini-search-engine-kqrg6vcgvsmtgydxzkuqj.streamlit.app/)
 
 ---
 
