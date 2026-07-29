@@ -1,6 +1,3 @@
-import re
-
-
 def is_phrase_query(query: str) -> bool:
     query = query.strip()
 
@@ -13,42 +10,26 @@ def is_phrase_query(query: str) -> bool:
 
 def parse_boolean_query(query: str):
     """
-    Supports simple queries such as:
+    Supports simple Boolean queries:
 
-    london AND clay
+    pile AND load
     pile OR raft
     clay NOT sand
     """
 
     tokens = query.strip().split()
-
     upper_tokens = [token.upper() for token in tokens]
 
-    if "AND" in upper_tokens:
+    for operator in ["AND", "OR", "NOT"]:
 
-        index = upper_tokens.index("AND")
+        if operator in upper_tokens:
 
-        left = " ".join(tokens[:index])
-        right = " ".join(tokens[index + 1:])
+            index = upper_tokens.index(operator)
 
-        return "AND", left, right
+            left = " ".join(tokens[:index]).strip()
+            right = " ".join(tokens[index + 1:]).strip()
 
-    if "OR" in upper_tokens:
-
-        index = upper_tokens.index("OR")
-
-        left = " ".join(tokens[:index])
-        right = " ".join(tokens[index + 1:])
-
-        return "OR", left, right
-
-    if "NOT" in upper_tokens:
-
-        index = upper_tokens.index("NOT")
-
-        left = " ".join(tokens[:index])
-        right = " ".join(tokens[index + 1:])
-
-        return "NOT", left, right
+            if left and right:
+                return operator, left, right
 
     return None
