@@ -22,7 +22,7 @@ st.title("🔎 Mini Search Engine")
 
 st.markdown(
     """
-    Search your own documents using a search engine implemented
+    Search uploaded documents using a search engine implemented
     from scratch in Python.
 
     **Supported retrieval methods:**  
@@ -36,64 +36,112 @@ st.markdown(
 # =========================================================
 
 def extract_txt(file):
+
     try:
-        return file.getvalue().decode("utf-8", errors="ignore")
+
+        text = file.getvalue().decode(
+            "utf-8",
+            errors="ignore"
+        )
+
+        return text, {1: text}
+
     except Exception:
-        return ""
+
+        return "", {}
 
 
 def extract_pdf(file):
-    try:
-        reader = PdfReader(file)
-        pages = []
 
-        for page in reader.pages:
+    try:
+
+        reader = PdfReader(file)
+
+        pages = {}
+        full_text = []
+
+        for page_number, page in enumerate(
+            reader.pages,
+            start=1
+        ):
+
             text = page.extract_text()
 
             if text:
-                pages.append(text)
+                pages[page_number] = text
+                full_text.append(text)
 
-        return "\n".join(pages)
+        return "\n".join(
+            full_text
+        ), pages
 
     except Exception:
-        return ""
+
+        return "", {}
 
 
 def extract_docx(file):
+
     temp_path = None
 
     try:
+
         with tempfile.NamedTemporaryFile(
             delete=False,
             suffix=".docx"
         ) as temp_file:
 
-            temp_file.write(file.getvalue())
+            temp_file.write(
+                file.getvalue()
+            )
+
             temp_path = temp_file.name
 
-        document = docx.Document(temp_path)
-
-        text = "\n".join(
-            paragraph.text
-            for paragraph in document.paragraphs
-            if paragraph.text.strip()
+        document = docx.Document(
+            temp_path
         )
 
-        return text
+        paragraphs = [
+            paragraph.text
+            for paragraph
+            in document.paragraphs
+            if paragraph.text.strip()
+        ]
+
+        text = "\n".join(
+            paragraphs
+        )
+
+        # DOCX does not expose reliable page
+        # boundaries, so treat the file as one section.
+        pages = {
+            1: text
+        }
+
+        return text, pages
 
     except Exception:
-        return ""
+
+        return "", {}
 
     finally:
+
         if temp_path:
-            Path(temp_path).unlink(missing_ok=True)
+
+            Path(
+                temp_path
+            ).unlink(
+                missing_ok=True
+            )
 
 
 # =========================================================
 # SIDEBAR
 # =========================================================
 
-st.sidebar.header("Search Settings")
+st.sidebar.header(
+    "Search Settings"
+)
 
 limit = st.sidebar.slider(
     "Maximum results",
@@ -107,44 +155,74 @@ limit = st.sidebar.slider(
 # DOCUMENT UPLOAD
 # =========================================================
 
-st.header("1. Upload Documents")
+st.header(
+    "1. Upload Documents"
+)
 
 uploaded_files = st.file_uploader(
     "Upload TXT, PDF or Word documents",
-    type=["txt", "pdf", "docx"],
+    type=[
+        "txt",
+        "pdf",
+        "docx"
+    ],
     accept_multiple_files=True
 )
 
 
 # =========================================================
-# BUILD SEARCH INDEX
+# BUILD INDEX
 # =========================================================
 
 if uploaded_files:
 
     engine = SearchEngine()
+
     indexed_documents = 0
 
     with st.spinner(
-        "Extracting text and building inverted index..."
+        "Extracting text and building search index..."
     ):
 
-        for document_id, file in enumerate(uploaded_files):
+        for document_id, file in enumerate(
+            uploaded_files
+        ):
 
-            file_name = file.name.lower()
+            file_name = (
+                file.name.lower()
+            )
 
-            if file_name.endswith(".txt"):
+            if file_name.endswith(
+                ".txt"
+            ):
 
-                text = extract_txt(file)
+                text, pages = (
+                    extract_txt(
+                        file
+                    )
+                )
 
-            elif file_name.endswith(".pdf"):
+            elif file_name.endswith(
+                ".pdf"
+            ):
 
                 file.seek(0)
-                text = extract_pdf(file)
 
-            elif file_name.endswith(".docx"):
+                text, pages = (
+                    extract_pdf(
+                        file
+                    )
+                )
 
-                text = extract_docx(file)
+            elif file_name.endswith(
+                ".docx"
+            ):
+
+                text, pages = (
+                    extract_docx(
+                        file
+                    )
+                )
 
             else:
 
@@ -162,12 +240,15 @@ if uploaded_files:
                 document_id=document_id,
                 title=file.name,
                 path=file.name,
-                text=text
+                text=text,
+                pages=pages
             )
 
             indexed_documents += 1
 
-    st.session_state.engine = engine
+    st.session_state.engine = (
+        engine
+    )
 
     st.success(
         f"✅ Indexed {indexed_documents} document(s)."
@@ -180,15 +261,23 @@ if uploaded_files:
 
 if "engine" in st.session_state:
 
-    engine = st.session_state.engine
+    engine = (
+        st.session_state.engine
+    )
 
     st.divider()
 
-    st.header("2. Search Documents")
+    st.header(
+        "2. Search Documents"
+    )
 
     query = st.text_input(
         "Enter search query",
-        placeholder='Examples: london clay | "london clay" | pile AND load'
+        placeholder=(
+            'Examples: london clay | '
+            '"london clay" | '
+            'pile AND load'
+        )
     )
 
     st.markdown(
@@ -198,8 +287,8 @@ if "engine" in st.session_state:
         - `london clay` → TF-IDF ranked search
         - `"london clay"` → exact phrase search
         - `pile AND load` → both terms required
-        - `pile OR raft` → either term
-        - `clay NOT sand` → clay excluding sand
+        - `pile OR raft` → either term may be present
+        - `clay NOT sand` → clay must be present and sand absent
         """
     )
 
@@ -214,7 +303,9 @@ if "engine" in st.session_state:
 
             st.divider()
 
-            st.subheader("Search Results")
+            st.subheader(
+                "Search Results"
+            )
 
             if not results:
 
@@ -234,26 +325,120 @@ if "engine" in st.session_state:
                 ):
 
                     st.markdown(
-                        f"### {rank}. {result.title}"
+                        f"## {rank}. {result.title}"
                     )
 
-                    col1, col2 = st.columns([1, 4])
+                    st.caption(
+                        f"Search type: {result.match_type}"
+                    )
 
-                    with col1:
+                    # =====================================
+                    # SCORE
+                    # =====================================
+
+                    if (
+                        result.match_type
+                        == "TF-IDF Ranked Search"
+                    ):
 
                         st.metric(
-                            "Relevance Score",
-                            f"{result.score:.4f}"
+                            "TF-IDF Relevance Score",
+                            f"{result.score:.6f}"
                         )
 
-                    with col2:
+                    else:
 
-                        st.caption(
-                            f"Source: {result.path}"
+                        st.success(
+                            "Search condition matched"
                         )
+
+                    # =====================================
+                    # TERM STATISTICS
+                    # =====================================
+
+                    st.markdown(
+                        "### Match Statistics"
+                    )
+
+                    if result.term_matches:
+
+                        rows = []
+
+                        for match in result.term_matches:
+
+                            if match.pages:
+
+                                page_text = ", ".join(
+                                    str(page)
+                                    for page
+                                    in match.pages
+                                )
+
+                            else:
+
+                                page_text = (
+                                    "Not present"
+                                )
+
+                            rows.append(
+                                {
+                                    "Term / Phrase":
+                                        match.term,
+
+                                    "Occurrences":
+                                        match.count,
+
+                                    "Pages":
+                                        page_text
+                                }
+                            )
+
+                        st.table(
+                            rows
+                        )
+
+                    # =====================================
+                    # BOOLEAN EXPLANATION
+                    # =====================================
+
+                    if result.match_type.startswith(
+                        "Boolean"
+                    ):
+
+                        st.markdown(
+                            "### Boolean Match Details"
+                        )
+
+                        for match in result.term_matches:
+
+                            if match.count > 0:
+
+                                st.write(
+                                    f"✅ `{match.term}` "
+                                    f"found {match.count} time(s)"
+                                )
+
+                            else:
+
+                                st.write(
+                                    f"❌ `{match.term}` "
+                                    "not present"
+                                )
+
+                    # =====================================
+                    # SNIPPET
+                    # =====================================
+
+                    st.markdown(
+                        "### Relevant Excerpt"
+                    )
 
                     st.write(
                         result.snippet
+                    )
+
+                    st.caption(
+                        f"Source: {result.path}"
                     )
 
                     st.divider()
@@ -278,17 +463,19 @@ else:
 
 st.divider()
 
-with st.expander("ℹ️ How does this search engine work?"):
+with st.expander(
+    "ℹ️ How does this search engine work?"
+):
 
     st.markdown(
         """
 ### 1. Tokenisation
 
-Uploaded document text is converted into normalised lowercase tokens.
+Document text is converted into lowercase word tokens.
 
 For example:
 
-**London Clay is stiff**
+`London Clay is stiff`
 
 becomes:
 
@@ -296,42 +483,62 @@ becomes:
 
 ### 2. Positional Inverted Index
 
-The engine records:
+The engine stores:
 
-- which terms occur in the document collection
 - which documents contain each term
-- the positions at which each term occurs
+- how many times the term occurs
+- the token positions where it occurs
 
-For example, the index may conceptually contain:
+This supports fast lookup and phrase searching.
 
-`"clay" → Document 1: [5, 19, 42]`
+### 3. TF-IDF Ranked Search
 
-This means that the word **clay** occurs in Document 1 at word positions 5, 19 and 42.
+A normal query such as:
 
-### 3. TF-IDF Ranking
+`london clay`
 
-Normal text queries are ranked using **Term Frequency–Inverse Document Frequency (TF-IDF)**.
+uses TF-IDF to rank documents according to the importance of the query terms.
 
-Terms that are important within a document but less common across the overall document collection receive greater weight.
+### 4. Exact Phrase Search
 
-### 4. Phrase Search
-
-The positional index allows the search engine to determine whether words occur consecutively.
-
-For example:
+A query such as:
 
 `"london clay"`
 
-returns documents where **london** is immediately followed by **clay**.
+uses stored token positions to determine whether the words appear consecutively.
 
 ### 5. Boolean Search
 
-Boolean queries are processed using set operations:
+Queries may use:
 
-- **AND** → intersection
-- **OR** → union
-- **NOT** → difference
+- `AND`
+- `OR`
+- `NOT`
 
-The indexing, query processing and retrieval algorithms are implemented directly in Python rather than using an external search engine or vector database.
+Examples:
+
+`pile AND load`
+
+requires both terms.
+
+`pile OR raft`
+
+returns documents containing either term or both.
+
+`clay NOT sand`
+
+returns documents containing clay while excluding documents containing sand.
+
+### 6. Match Statistics
+
+For each result, the application also shows:
+
+- number of term occurrences
+- page numbers where the term occurs
+- relevant source excerpt
+
+For PDF files, actual PDF page numbers are retained during indexing.
+
+DOCX and TXT files do not provide reliable page boundaries, so they are currently treated as a single searchable section.
         """
     )
